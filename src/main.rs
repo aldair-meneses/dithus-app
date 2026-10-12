@@ -1,6 +1,8 @@
+mod capture;
 mod config;
 mod provider;
 
+use capture::capture_screenshot;
 use clap::{Parser, Subcommand};
 use config::load_config;
 use provider::{ChatProvider, StubProvider};
@@ -50,7 +52,16 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         },
-        None => Vec::new(),
+        None => match capture_screenshot() {
+            Ok(screen) => {
+                eprintln!("captured screen via {}", screen.backend.name());
+                screen.png
+            }
+            Err(err) => {
+                eprintln!("{}", err.0);
+                return ExitCode::from(1);
+            }
+        },
     };
 
     match provider.ask(&question, &image_bytes) {
