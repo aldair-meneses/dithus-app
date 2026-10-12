@@ -5,7 +5,7 @@ mod provider;
 use capture::capture_screenshot;
 use clap::{Parser, Subcommand};
 use config::load_config;
-use provider::{ChatProvider, StubProvider};
+use provider::{ChatProvider, OpenCodeProvider, StubProvider};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -38,6 +38,11 @@ fn main() -> ExitCode {
     let loaded = load_config(&config);
     let provider: Box<dyn ChatProvider> = match loaded.provider.as_str() {
         "stub" => Box::new(StubProvider),
+        "opencode" => Box::new(OpenCodeProvider {
+            command: "opencode".to_string(),
+            model: loaded.opencode_model.clone(),
+            timeout: std::time::Duration::from_secs(300),
+        }),
         other => {
             eprintln!("provider \"{other}\" not yet implemented in milestone 1");
             return ExitCode::from(2);

@@ -75,6 +75,61 @@ fn unconfigured_provider_fails_with_clear_message() {
 }
 
 #[test]
+fn ask_with_opencode_provider_uses_configured_model() {
+    let dir = std::env::temp_dir().join(format!("dithus-oc-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("opencode"),
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"$@\" > \"$(dirname \"$0\")/argv\"\n",
+            "printf '%s\\n' '{\"type\":\"text\",\"part\":{\"type\":\"text\",\"text\":\"live answer\"}}'\n",
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("opencode"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    std::fs::write(
+        dir.join("dithus.toml"),
+        "provider = \"opencode\"\nopencode_model = \"probe-model\"\n",
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = dithus()
+        .env("PATH", path)
+        .args([
+            "ask",
+            "--question",
+            "what is on my screen?",
+            "--image",
+            "tests/fixtures/screen.png",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "live answer\n"
+    );
+    let argv = std::fs::read_to_string(dir.join("argv")).unwrap();
+    assert!(
+        argv.contains("--model probe-model"),
+        "expected configured model in argv, got: {argv:?}"
+    );
+}
+
+#[test]
 fn ask_without_image_captures_screen_and_names_backend() {
     let dir = std::env::temp_dir().join(format!("dithus-grim-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

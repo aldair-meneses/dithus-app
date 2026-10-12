@@ -30,7 +30,7 @@ fn default_openai_model() -> String {
 }
 
 fn default_opencode_model() -> String {
-    "default".to_string()
+    String::new()
 }
 
 fn default_capture_interval_secs() -> u64 {
