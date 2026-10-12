@@ -5,7 +5,7 @@ mod provider;
 use capture::capture_screenshot;
 use clap::{Parser, Subcommand};
 use config::load_config;
-use provider::{ChatProvider, OpenCodeProvider, StubProvider};
+use provider::{ChatProvider, OllamaProvider, OpenAIProvider, OpenCodeProvider, StubProvider};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -43,6 +43,28 @@ fn main() -> ExitCode {
             model: loaded.opencode_model.clone(),
             timeout: std::time::Duration::from_secs(300),
         }),
+        "ollama" => Box::new(OllamaProvider {
+            base_url: std::env::var("OLLAMA_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
+            model: loaded.ollama_model.clone(),
+            timeout: std::time::Duration::from_secs(120),
+        }),
+        "openai" => {
+            let api_key = match std::env::var("OPENAI_API_KEY") {
+                Ok(key) if !key.is_empty() => key,
+                _ => {
+                    eprintln!("OPENAI_API_KEY is not set; export it before using the openai provider");
+                    return ExitCode::from(2);
+                }
+            };
+            Box::new(OpenAIProvider {
+                base_url: std::env::var("OPENAI_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+                model: loaded.openai_model.clone(),
+                api_key,
+                timeout: std::time::Duration::from_secs(120),
+            })
+        }
         other => {
             eprintln!("provider \"{other}\" not yet implemented in milestone 1");
             return ExitCode::from(2);

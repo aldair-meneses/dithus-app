@@ -52,7 +52,7 @@ fn unconfigured_provider_fails_with_clear_message() {
     let dir = std::env::temp_dir().join(format!("dithus-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let config_path = dir.join("dithus.toml");
-    std::fs::write(&config_path, "provider = \"ollama\"\n").unwrap();
+    std::fs::write(&config_path, "provider = \"pluely\"\n").unwrap();
 
     let output = dithus()
         .args([
@@ -69,8 +69,171 @@ fn unconfigured_provider_fails_with_clear_message() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("ollama") && stderr.contains("not yet implemented"),
+        stderr.contains("pluely") && stderr.contains("not yet implemented"),
         "expected clear unimplemented-provider message, got: {stderr}"
+    );
+}
+
+fn serve_chat_once(answer: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let body = format!(
+        r#"{{"choices":[{{"message":{{"role":"assistant","content":{answer:?}}}}}]}}"#,
+    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buf[..n]);
+            if let Some(end) = raw
+                .windows(4)
+                .position(|w| w == b"\r\n\r\n")
+                .map(|pos| pos + 4)
+            {
+                let length = String::from_utf8_lossy(&raw)
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                while raw.len() < end + length {
+                    let n = stream.read(&mut buf).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buf[..n]);
+                }
+                break;
+            }
+        }
+        sender.send(String::from_utf8_lossy(&raw).into_owned()).unwrap();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    (base_url, receiver)
+}
+
+#[test]
+fn ask_with_ollama_provider_hits_configured_base_url() {
+    let (base_url, request) = serve_chat_once("mock answer");
+    let dir = std::env::temp_dir().join(format!("dithus-ollama-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("dithus.toml"),
+        "provider = \"ollama\"\nollama_model = \"probe-model\"\n",
+    )
+    .unwrap();
+
+    let output = dithus()
+        .env("OLLAMA_BASE_URL", &base_url)
+        .args([
+            "ask",
+            "--question",
+            "what is on my screen?",
+            "--image",
+            "tests/fixtures/screen.png",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "mock answer\n"
+    );
+    let raw = request.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+    assert!(
+        raw.contains("POST /chat/completions") && raw.contains("probe-model"),
+        "expected chat request at mock server, got: {raw:?}"
+    );
+}
+
+#[test]
+fn ask_with_openai_provider_uses_env_key() {
+    let (base_url, request) = serve_chat_once("cloud answer");
+    let dir = std::env::temp_dir().join(format!("dithus-openai-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("dithus.toml"),
+        "provider = \"openai\"\nopenai_model = \"probe-model\"\n",
+    )
+    .unwrap();
+
+    let output = dithus()
+        .env("OPENAI_BASE_URL", &base_url)
+        .env("OPENAI_API_KEY", "test-key-abc")
+        .args([
+            "ask",
+            "--question",
+            "what is on my screen?",
+            "--image",
+            "tests/fixtures/screen.png",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "cloud answer\n"
+    );
+    let raw = request.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+    assert!(
+        raw.contains("authorization: Bearer test-key-abc"),
+        "expected bearer key at mock server, got: {raw:?}"
+    );
+}
+
+#[test]
+fn openai_missing_key_names_the_variable() {
+    let dir = std::env::temp_dir().join(format!("dithus-nokey-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("dithus.toml"), "provider = \"openai\"\n").unwrap();
+
+    let output = dithus()
+        .env_remove("OPENAI_API_KEY")
+        .args([
+            "ask",
+            "--question",
+            "hi",
+            "--image",
+            "tests/fixtures/screen.png",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("OPENAI_API_KEY"),
+        "expected variable name in error, got: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains("test-key-abc"),
+        "unexpected key material in error: {stderr:?}"
     );
 }
 
