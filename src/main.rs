@@ -66,13 +66,6 @@ fn main() -> ExitCode {
     } = cli.command;
 
     let loaded = load_config(&config);
-    let provider = match pipeline::build_provider(&loaded) {
-        Ok(provider) => provider,
-        Err(message) => {
-            eprintln!("{message}");
-            return ExitCode::from(2);
-        }
-    };
     eprintln!("asking {}...", describe_stage(&loaded));
 
     let period = interval.or(if repeat {
@@ -82,12 +75,7 @@ fn main() -> ExitCode {
     });
 
     loop {
-        match pipeline::ask_once(
-            &question,
-            image.as_deref(),
-            capture_screenshot,
-            provider.as_ref(),
-        ) {
+        match pipeline::run_ask(&loaded, &question, image.as_deref(), capture_screenshot) {
             Ok(outcome) => {
                 if let Some(backend) = outcome.backend {
                     eprintln!("captured screen via {}", backend.name());
@@ -98,17 +86,13 @@ fn main() -> ExitCode {
                     None => return ExitCode::SUCCESS,
                 }
             }
-            Err(pipeline::AskError::Image(message)) => {
-                eprintln!("{message}");
-                return ExitCode::from(2);
-            }
-            Err(pipeline::AskError::Capture(err)) => {
-                eprintln!("{}", err.0);
-                return ExitCode::from(1);
-            }
-            Err(pipeline::AskError::Provider(err)) => {
-                eprintln!("provider error: {}", err.0);
-                return ExitCode::from(1);
+            Err(err) => {
+                eprintln!("{err}");
+                return ExitCode::from(match err {
+                    pipeline::PipelineError::Build(_) => 2,
+                    pipeline::PipelineError::Ask(pipeline::AskError::Image { .. }) => 2,
+                    _ => 1,
+                });
             }
         }
     }

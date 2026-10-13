@@ -249,21 +249,25 @@ fn parse_answer(output: &[u8]) -> Result<String, ProviderError> {
         let event: serde_json::Value = serde_json::from_str(line).map_err(|err| {
             ProviderError(format!("opencode printed non-JSON output: {err}"))
         })?;
-        if event.get("type").and_then(|t| t.as_str()) == Some("text")
-            && let Some(chunk) = event
-                .get("part")
-                .and_then(|part| part.get("text"))
-                .and_then(|t| t.as_str())
-        {
-            answer.push_str(chunk);
-        }
-        if event.get("type").and_then(|t| t.as_str()) == Some("error") {
-            let message = event
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|m| m.as_str())
-                .unwrap_or("unknown provider error");
-            return Err(ProviderError(format!("opencode reported an error: {message}")));
+        match event.get("type").and_then(|t| t.as_str()) {
+            Some("text") => {
+                if let Some(chunk) = event
+                    .get("part")
+                    .and_then(|part| part.get("text"))
+                    .and_then(|t| t.as_str())
+                {
+                    answer.push_str(chunk);
+                }
+            }
+            Some("error") => {
+                let message = event
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown provider error");
+                return Err(ProviderError(format!("opencode reported an error: {message}")));
+            }
+            _ => {}
         }
     }
     if answer.is_empty() {

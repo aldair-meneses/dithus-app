@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Backend {
     Portal,
     Grim,
@@ -15,7 +15,7 @@ impl Backend {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CapturedScreen {
     pub png: Vec<u8>,
     pub backend: Backend,
