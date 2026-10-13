@@ -104,9 +104,10 @@ mod tests {
         let config = load_config(&test_temp_path("dithus-partial"));
         assert_eq!(config.provider, "openai");
         assert_eq!(config, {
-            let mut expected = Config::default();
-            expected.provider = "openai".to_string();
-            expected
+            Config {
+                provider: "openai".to_string(),
+                ..Config::default()
+            }
         });
     }
 

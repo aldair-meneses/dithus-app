@@ -249,14 +249,13 @@ fn parse_answer(output: &[u8]) -> Result<String, ProviderError> {
         let event: serde_json::Value = serde_json::from_str(line).map_err(|err| {
             ProviderError(format!("opencode printed non-JSON output: {err}"))
         })?;
-        if event.get("type").and_then(|t| t.as_str()) == Some("text") {
-            if let Some(chunk) = event
+        if event.get("type").and_then(|t| t.as_str()) == Some("text")
+            && let Some(chunk) = event
                 .get("part")
                 .and_then(|part| part.get("text"))
                 .and_then(|t| t.as_str())
-            {
-                answer.push_str(chunk);
-            }
+        {
+            answer.push_str(chunk);
         }
         if event.get("type").and_then(|t| t.as_str()) == Some("error") {
             let message = event
