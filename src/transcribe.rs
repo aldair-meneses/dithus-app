@@ -4,8 +4,36 @@ use std::time::Duration;
 pub const DEFAULT_TRANSCRIBER: &str = "whisper-cli";
 pub const DEFAULT_RECORDER: &str = "pw-record";
 
+const WAV_HEADER_LEN: u64 = 44;
+
 #[derive(Debug, PartialEq)]
 pub struct TranscribeError(pub String);
+
+impl std::fmt::Display for TranscribeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RecordError(pub String);
+
+impl std::fmt::Display for RecordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub fn temp_stem(prefix: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ))
+}
 
 pub struct WhisperCli {
     pub command: String,
@@ -28,14 +56,7 @@ impl WhisperCli {
                 self.model.display()
             )));
         }
-        let stem = std::env::temp_dir().join(format!(
-            "dithus-whisper-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
+        let stem = temp_stem("dithus-whisper");
         let mut child = std::process::Command::new(&self.command)
             .args([
                 "--model",
@@ -50,6 +71,7 @@ impl WhisperCli {
                 "--no-prints",
             ])
             .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
             .spawn()
             .map_err(|err| {
                 TranscribeError(format!(
@@ -106,7 +128,7 @@ impl WhisperCli {
     }
 }
 
-pub fn record_mic_with_command(program: &str, secs: u64, out: &Path) -> Result<(), String> {
+pub fn record_mic_with_command(program: &str, secs: u64, out: &Path) -> Result<(), RecordError> {
     use std::time::{Duration, Instant};
 
     let mut child = std::process::Command::new(program)
@@ -115,16 +137,16 @@ pub fn record_mic_with_command(program: &str, secs: u64, out: &Path) -> Result<(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|err| {
-            format!(
+            RecordError(format!(
                 "recorder failed to start ({program}): {err}. \
                  Is PipeWire installed with pw-record on PATH?"
-            )
+            ))
         })?;
     let deadline = Instant::now() + Duration::from_secs(secs);
     loop {
         match child
             .try_wait()
-            .map_err(|err| format!("recorder wait failed: {err}"))?
+            .map_err(|err| RecordError(format!("recorder wait failed: {err}")))?
         {
             Some(status) if !status.success() => {
                 let mut stderr = String::new();
@@ -132,7 +154,10 @@ pub fn record_mic_with_command(program: &str, secs: u64, out: &Path) -> Result<(
                     use std::io::Read;
                     let _ = pipe.read_to_string(&mut stderr);
                 }
-                return Err(format!("microphone capture failed: {}", stderr.trim()));
+                return Err(RecordError(format!(
+                    "microphone capture failed: {}",
+                    stderr.trim()
+                )));
             }
             Some(_) => break,
             None if Instant::now() >= deadline => {
@@ -143,14 +168,12 @@ pub fn record_mic_with_command(program: &str, secs: u64, out: &Path) -> Result<(
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     }
-    let empty = std::fs::metadata(out)
-        .map(|meta| meta.len() == 0)
-        .unwrap_or(true);
-    if empty {
-        return Err(
+    let samples = std::fs::metadata(out).map(|meta| meta.len()).unwrap_or(0);
+    if samples <= WAV_HEADER_LEN {
+        return Err(RecordError(
             "microphone capture produced no audio; check that a microphone is connected and unmuted"
                 .to_string(),
-        );
+        ));
     }
     Ok(())
 }
@@ -199,8 +222,7 @@ mod tests {
         );
         let wav = dir.join("in.wav");
         std::fs::write(&wav, [1u8, 2, 3, 4]).unwrap();
-        let model = dir.join("ggml-tiny.bin");
-        std::fs::write(&model, b"fakemodel").unwrap();
+        let model = fake_model(&dir);
         let cli = WhisperCli {
             command: dir.join("whisper-cli").to_str().unwrap().to_string(),
             model,
@@ -249,8 +271,7 @@ mod tests {
         let _guard = crate::test_support::write_exec_guard();
         let dir = std::env::temp_dir().join(format!("dithus-whisper-nobin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let model = dir.join("ggml-tiny.bin");
-        std::fs::write(&model, b"fakemodel").unwrap();
+        let model = fake_model(&dir);
         let cli = WhisperCli {
             command: "/nonexistent/whisper-cli".to_string(),
             model,
@@ -274,8 +295,7 @@ mod tests {
             "whisper-cli",
             "#!/bin/sh\necho no-good-model >&2\nexit 3\n",
         );
-        let model = dir.join("ggml-tiny.bin");
-        std::fs::write(&model, b"fakemodel").unwrap();
+        let model = fake_model(&dir);
         let cli = WhisperCli {
             command: dir.join("whisper-cli").to_str().unwrap().to_string(),
             model,
@@ -299,8 +319,7 @@ mod tests {
             "whisper-cli",
             "#!/bin/sh\nsleep 30\n",
         );
-        let model = dir.join("ggml-tiny.bin");
-        std::fs::write(&model, b"fakemodel").unwrap();
+        let model = fake_model(&dir);
         let cli = WhisperCli {
             command: dir.join("whisper-cli").to_str().unwrap().to_string(),
             model,
@@ -332,8 +351,7 @@ mod tests {
                 "printf '   ' > \"$out.txt\"\n",
             ),
         );
-        let model = dir.join("ggml-tiny.bin");
-        std::fs::write(&model, b"fakemodel").unwrap();
+        let model = fake_model(&dir);
         let cli = WhisperCli {
             command: dir.join("whisper-cli").to_str().unwrap().to_string(),
             model,
@@ -361,7 +379,7 @@ mod tests {
         let err =
             record_mic_with_command(dir.join("pw-record").to_str().unwrap(), 1, &out).unwrap_err();
         assert!(
-            err.contains("no such device"),
+            err.0.contains("no such device"),
             "expected device error, got: {err}"
         );
     }
@@ -374,9 +392,32 @@ mod tests {
         let err =
             record_mic_with_command(dir.join("pw-record").to_str().unwrap(), 1, &out).unwrap_err();
         assert!(
-            err.contains("no audio"),
+            err.0.contains("no audio"),
             "expected no-audio hint, got: {err}"
         );
+    }
+
+    #[test]
+    fn truncated_wav_reports_no_audio() {
+        let _guard = crate::test_support::write_exec_guard();
+        let dir = fake_bin(
+            "dithus-record-truncated",
+            "pw-record",
+            "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\nhead -c 10 /dev/zero > \"$last\"\n",
+        );
+        let out = dir.join("mic.wav");
+        let err =
+            record_mic_with_command(dir.join("pw-record").to_str().unwrap(), 1, &out).unwrap_err();
+        assert!(
+            err.0.contains("no audio"),
+            "expected no-audio hint, got: {err}"
+        );
+    }
+
+    fn fake_model(dir: &std::path::Path) -> std::path::PathBuf {
+        let model = dir.join("ggml-tiny.bin");
+        std::fs::write(&model, b"fakemodel").unwrap();
+        model
     }
 
     #[cfg(unix)]

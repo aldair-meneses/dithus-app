@@ -94,14 +94,7 @@ fn listen(audio: Option<PathBuf>, secs: u64, config: PathBuf) -> ExitCode {
     let wav = match &audio {
         Some(path) => path.as_path(),
         None => {
-            staged = std::env::temp_dir().join(format!(
-                "dithus-mic-{}-{}.wav",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
+            staged = transcribe::temp_stem("dithus-mic").with_extension("wav");
             if let Err(err) =
                 transcribe::record_mic_with_command(transcribe::DEFAULT_RECORDER, secs, &staged)
             {
@@ -121,7 +114,7 @@ fn listen(audio: Option<PathBuf>, secs: u64, config: PathBuf) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("{}", err.0);
+            eprintln!("{err}");
             ExitCode::from(1)
         }
     }

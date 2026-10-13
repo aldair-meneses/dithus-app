@@ -86,7 +86,38 @@ fn unconfigured_provider_fails_with_clear_message() {
     );
 }
 
+fn write_exec(path: &std::path::Path, body: &str) {
+    std::fs::write(path, body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+fn whisper_cli_stub(transcript: &str, log_argv: bool) -> String {
+    format!(
+        concat!(
+            "#!/bin/sh\n",
+            "{argv}",
+            "prev=\"\"\n",
+            "for a in \"$@\"; do\n",
+            "if [ \"$prev\" = \"--output-file\" ]; then out=\"$a\"; fi\n",
+            "prev=\"$a\"\n",
+            "done\n",
+            "printf '{transcript}' > \"$out.txt\"\n",
+        ),
+        argv = if log_argv {
+            "echo \"$@\" > \"$(dirname \"$0\")/argv\"\n"
+        } else {
+            ""
+        },
+        transcript = transcript,
+    )
+}
+
 fn serve_chat_once(answer: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -436,29 +467,10 @@ fn ask_with_opencode_provider_uses_configured_model() {
 fn listen_with_fixture_audio_prints_transcript() {
     let dir = std::env::temp_dir().join(format!("dithus-listen-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(
-        dir.join("whisper-cli"),
-        concat!(
-            "#!/bin/sh\n",
-            "echo \"$@\" > \"$(dirname \"$0\")/argv\"\n",
-            "prev=\"\"\n",
-            "for a in \"$@\"; do\n",
-            "if [ \"$prev\" = \"--output-file\" ]; then out=\"$a\"; fi\n",
-            "prev=\"$a\"\n",
-            "done\n",
-            "printf 'ola mundo' > \"$out.txt\"\n",
-        ),
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(
-            dir.join("whisper-cli"),
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
-    }
+    write_exec(
+        &dir.join("whisper-cli"),
+        &whisper_cli_stub("ola mundo", true),
+    );
     let model = dir.join("ggml-tiny.bin");
     std::fs::write(&model, b"fakemodel").unwrap();
     std::fs::write(
@@ -502,36 +514,18 @@ fn listen_without_audio_records_mic_then_transcribes() {
     std::fs::create_dir_all(&dir).unwrap();
     let fixture = std::path::absolute("tests/fixtures/tone.wav").unwrap();
     let marker = dir.join("mic-ran");
-    std::fs::write(
-        dir.join("pw-record"),
-        format!(
+    write_exec(
+        &dir.join("pw-record"),
+        &format!(
             "#!/bin/sh\ntouch {}\nfor a in \"$@\"; do last=\"$a\"; done\ncat {} > \"$last\"\n",
             marker.display(),
             fixture.display()
         ),
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join("whisper-cli"),
-        concat!(
-            "#!/bin/sh\n",
-            "prev=\"\"\n",
-            "for a in \"$@\"; do\n",
-            "if [ \"$prev\" = \"--output-file\" ]; then out=\"$a\"; fi\n",
-            "prev=\"$a\"\n",
-            "done\n",
-            "printf 'chained transcript' > \"$out.txt\"\n",
-        ),
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        for tool in ["pw-record", "whisper-cli"] {
-            std::fs::set_permissions(dir.join(tool), std::fs::Permissions::from_mode(0o755))
-                .unwrap();
-        }
-    }
+    );
+    write_exec(
+        &dir.join("whisper-cli"),
+        &whisper_cli_stub("chained transcript", false),
+    );
     let model = dir.join("ggml-tiny.bin");
     std::fs::write(&model, b"fakemodel").unwrap();
     std::fs::write(
