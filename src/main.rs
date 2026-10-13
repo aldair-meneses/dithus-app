@@ -24,7 +24,24 @@ enum Commands {
         image: Option<PathBuf>,
         #[arg(long, default_value = "dithus.toml")]
         config: PathBuf,
+        #[arg(long)]
+        repeat: bool,
+        #[arg(long, help = "Seconds between repeated asks; implies --repeat")]
+        interval: Option<u64>,
     },
+}
+
+fn describe_stage(config: &config::Config) -> String {
+    match config.provider.as_str() {
+        "stub" => "stub".to_string(),
+        "opencode" if config.opencode_model.is_empty() => {
+            "opencode with default model".to_string()
+        }
+        "opencode" => format!("opencode with model {}", config.opencode_model),
+        "ollama" => format!("ollama with model {}", config.ollama_model),
+        "openai" => format!("openai with model {}", config.openai_model),
+        other => format!("{other} (unimplemented)"),
+    }
 }
 
 fn main() -> ExitCode {
@@ -33,6 +50,8 @@ fn main() -> ExitCode {
         question,
         image,
         config,
+        repeat,
+        interval,
     } = cli.command;
 
     let loaded = load_config(&config);
@@ -70,8 +89,16 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    eprintln!("asking {}...", describe_stage(&loaded));
 
-    let image_bytes = match image {
+    let period = interval.or(if repeat {
+        Some(loaded.capture_interval_secs)
+    } else {
+        None
+    });
+
+    loop {
+        let image_bytes = match &image {
         Some(path) => match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(err) => {
@@ -94,11 +121,15 @@ fn main() -> ExitCode {
     match provider.ask(&question, &image_bytes) {
         Ok(answer) => {
             println!("{answer}");
-            ExitCode::SUCCESS
+            match period {
+                Some(secs) => std::thread::sleep(std::time::Duration::from_secs(secs)),
+                None => return ExitCode::SUCCESS,
+            }
         }
         Err(err) => {
             eprintln!("provider error: {}", err.0);
-            ExitCode::from(1)
+            return ExitCode::from(1);
         }
+    }
     }
 }

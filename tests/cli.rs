@@ -238,6 +238,134 @@ fn openai_missing_key_names_the_variable() {
 }
 
 #[test]
+fn ask_without_image_runs_full_chain_to_mock_provider() {
+    let dir = std::env::temp_dir().join(format!("dithus-chain-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let marker = dir.join("grim-ran");
+    let fixture = std::path::absolute("tests/fixtures/screen.png").unwrap();
+    std::fs::write(
+        dir.join("grim"),
+        format!(
+            "#!/bin/sh\ntouch {}\ncat {}\n",
+            marker.display(),
+            fixture.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("grim"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    let (base_url, _request) = serve_chat_once("chained answer");
+    std::fs::write(dir.join("dithus.toml"), "provider = \"ollama\"\n").unwrap();
+    let path = format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = dithus()
+        .env("PATH", path)
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
+        .env("OLLAMA_BASE_URL", &base_url)
+        .args([
+            "ask",
+            "--question",
+            "what is on my screen?",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "chained answer\n"
+    );
+    assert!(
+        marker.exists(),
+        "expected screen capture to run in the chain"
+    );
+}
+
+#[test]
+fn ask_logs_provider_and_model_stage() {
+    let (base_url, _request) = serve_chat_once("mock answer");
+    let dir = std::env::temp_dir().join(format!("dithus-stage-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("dithus.toml"),
+        "provider = \"ollama\"\nollama_model = \"probe-model\"\n",
+    )
+    .unwrap();
+
+    let output = dithus()
+        .env("OLLAMA_BASE_URL", &base_url)
+        .args([
+            "ask",
+            "--question",
+            "hi",
+            "--image",
+            "tests/fixtures/screen.png",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("ollama") && stderr.contains("probe-model"),
+        "expected provider stage log, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn ask_repeat_prints_an_answer_per_interval() {
+    use std::io::{BufRead, BufReader};
+
+    let mut child = dithus()
+        .args([
+            "ask",
+            "--question",
+            "repeat q",
+            "--image",
+            "tests/fixtures/screen.png",
+            "--config",
+            "/nonexistent/dithus.toml",
+            "--repeat",
+            "--interval",
+            "0",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if sender.send(line.unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+    let mut answers = Vec::new();
+    for _ in 0..2 {
+        answers.push(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(15))
+                .unwrap(),
+        );
+    }
+    child.kill().unwrap();
+    let _ = child.wait();
+    assert_eq!(answers, vec!["stub answer: repeat q".to_string(); 2]);
+}
+
+#[test]
 fn ask_with_opencode_provider_uses_configured_model() {
     let dir = std::env::temp_dir().join(format!("dithus-oc-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
