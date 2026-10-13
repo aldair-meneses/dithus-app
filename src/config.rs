@@ -15,6 +15,8 @@ pub struct Config {
     pub capture_interval_secs: u64,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_transcribe_model")]
+    pub transcribe_model: String,
 }
 
 fn default_provider() -> String {
@@ -39,6 +41,10 @@ fn default_capture_interval_secs() -> u64 {
 
 fn default_language() -> String {
     "en".to_string()
+}
+
+fn default_transcribe_model() -> String {
+    "models/ggml-tiny.bin".to_string()
 }
 
 impl Default for Config {
@@ -78,6 +84,7 @@ mod tests {
                 "opencode_model = \"pro\"\n",
                 "capture_interval_secs = 10\n",
                 "language = \"pt-BR\"\n",
+                "transcribe_model = \"/tmp/ggml-base.bin\"\n",
             )
         )
         .unwrap();
@@ -92,8 +99,18 @@ mod tests {
                 opencode_model: "pro".to_string(),
                 capture_interval_secs: 10,
                 language: "pt-BR".to_string(),
+                transcribe_model: "/tmp/ggml-base.bin".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn transcribe_model_parses_and_defaults() {
+        let mut file = tempfile_path("dithus-transcribe-model");
+        writeln!(file, "transcribe_model = \"/tmp/custom/ggml-small.bin\"\n").unwrap();
+        let config = load_config(&test_temp_path("dithus-transcribe-model"));
+        assert_eq!(config.transcribe_model, "/tmp/custom/ggml-small.bin");
+        assert_eq!(Config::default().transcribe_model, "models/ggml-tiny.bin");
     }
 
     #[test]

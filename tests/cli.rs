@@ -433,6 +433,162 @@ fn ask_with_opencode_provider_uses_configured_model() {
 }
 
 #[test]
+fn listen_with_fixture_audio_prints_transcript() {
+    let dir = std::env::temp_dir().join(format!("dithus-listen-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("whisper-cli"),
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"$@\" > \"$(dirname \"$0\")/argv\"\n",
+            "prev=\"\"\n",
+            "for a in \"$@\"; do\n",
+            "if [ \"$prev\" = \"--output-file\" ]; then out=\"$a\"; fi\n",
+            "prev=\"$a\"\n",
+            "done\n",
+            "printf 'ola mundo' > \"$out.txt\"\n",
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            dir.join("whisper-cli"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let model = dir.join("ggml-tiny.bin");
+    std::fs::write(&model, b"fakemodel").unwrap();
+    std::fs::write(
+        dir.join("dithus.toml"),
+        format!(
+            "transcribe_model = \"{}\"\nlanguage = \"pt-BR\"\n",
+            model.display()
+        ),
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = reliable_output(dithus().env("PATH", path).args([
+        "listen",
+        "--audio",
+        "tests/fixtures/tone.wav",
+        "--config",
+        dir.join("dithus.toml").to_str().unwrap(),
+    ]));
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "ola mundo\n");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("pt-BR"),
+        "expected language stage log, got: {stderr:?}"
+    );
+    let argv = std::fs::read_to_string(dir.join("argv")).unwrap();
+    assert!(
+        argv.contains("--language pt-BR"),
+        "expected language in argv, got: {argv:?}"
+    );
+}
+
+#[test]
+fn listen_without_audio_records_mic_then_transcribes() {
+    let dir = std::env::temp_dir().join(format!("dithus-listen-mic-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fixture = std::path::absolute("tests/fixtures/tone.wav").unwrap();
+    let marker = dir.join("mic-ran");
+    std::fs::write(
+        dir.join("pw-record"),
+        format!(
+            "#!/bin/sh\ntouch {}\nfor a in \"$@\"; do last=\"$a\"; done\ncat {} > \"$last\"\n",
+            marker.display(),
+            fixture.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("whisper-cli"),
+        concat!(
+            "#!/bin/sh\n",
+            "prev=\"\"\n",
+            "for a in \"$@\"; do\n",
+            "if [ \"$prev\" = \"--output-file\" ]; then out=\"$a\"; fi\n",
+            "prev=\"$a\"\n",
+            "done\n",
+            "printf 'chained transcript' > \"$out.txt\"\n",
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for tool in ["pw-record", "whisper-cli"] {
+            std::fs::set_permissions(dir.join(tool), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+    }
+    let model = dir.join("ggml-tiny.bin");
+    std::fs::write(&model, b"fakemodel").unwrap();
+    std::fs::write(
+        dir.join("dithus.toml"),
+        format!("transcribe_model = \"{}\"\n", model.display()),
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = reliable_output(dithus().env("PATH", path).args([
+        "listen",
+        "--secs",
+        "1",
+        "--config",
+        dir.join("dithus.toml").to_str().unwrap(),
+    ]));
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "chained transcript\n"
+    );
+    assert!(marker.exists(), "expected the recorder to run in the chain");
+}
+
+#[test]
+fn listen_missing_model_logs_plainly() {
+    let dir = std::env::temp_dir().join(format!("dithus-listen-nomodel-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("dithus.toml"),
+        "transcribe_model = \"/nonexistent/ggml-x.bin\"\n",
+    )
+    .unwrap();
+
+    let output = dithus()
+        .args([
+            "listen",
+            "--audio",
+            "tests/fixtures/tone.wav",
+            "--config",
+            dir.join("dithus.toml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("/nonexistent/ggml-x.bin") && stderr.contains("huggingface.co"),
+        "expected model path and source, got: {stderr:?}"
+    );
+}
+
+#[test]
 fn ask_without_image_captures_screen_and_names_backend() {
     let dir = std::env::temp_dir().join(format!("dithus-grim-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
