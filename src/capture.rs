@@ -256,6 +256,7 @@ mod tests {
 
     #[test]
     fn grim_adapter_returns_program_stdout() {
+        let _guard = crate::test_support::write_exec_guard();
         let program = fake_script("dithus-grim-ok", "#!/bin/sh\nprintf 'fakepng'");
         let png = grim_shot_with_command(&program, Duration::from_secs(5)).unwrap();
         assert_eq!(png, b"fakepng".to_vec());
@@ -263,6 +264,7 @@ mod tests {
 
     #[test]
     fn grim_adapter_reports_failing_exit_with_stderr() {
+        let _guard = crate::test_support::write_exec_guard();
         let program = fake_script("dithus-grim-fail", "#!/bin/sh\necho boom >&2\nexit 1");
         let err = grim_shot_with_command(&program, Duration::from_secs(5)).unwrap_err();
         assert!(
@@ -273,6 +275,7 @@ mod tests {
 
     #[test]
     fn grim_adapter_kills_a_hung_program() {
+        let _guard = crate::test_support::write_exec_guard();
         let program = fake_script("dithus-grim-hung", "#!/bin/sh\nsleep 30");
         let err = grim_shot_with_command(&program, Duration::from_secs(1)).unwrap_err();
         assert!(
@@ -283,6 +286,7 @@ mod tests {
 
     #[test]
     fn grim_adapter_drains_large_stdout() {
+        let _guard = crate::test_support::write_exec_guard();
         let program = fake_script("dithus-grim-big", "#!/bin/sh\nhead -c 200000 /dev/zero");
         let png = grim_shot_with_command(&program, Duration::from_secs(10)).unwrap();
         assert_eq!(png, vec![0u8; 200000]);

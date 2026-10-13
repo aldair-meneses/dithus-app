@@ -4,6 +4,18 @@ fn dithus() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dithus"))
 }
 
+fn reliable_output(cmd: &mut Command) -> std::process::Output {
+    let mut output = cmd.output().unwrap();
+    for _ in 0..3 {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if output.status.success() || !stderr.contains("Text file busy") {
+            break;
+        }
+        output = cmd.output().unwrap();
+    }
+    output
+}
+
 #[test]
 fn ask_with_fixture_image_prints_stub_answer() {
     let output = dithus()
@@ -266,19 +278,19 @@ fn ask_without_image_runs_full_chain_to_mock_provider() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let output = dithus()
-        .env("PATH", path)
-        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
-        .env("OLLAMA_BASE_URL", &base_url)
-        .args([
-            "ask",
-            "--question",
-            "what is on my screen?",
-            "--config",
-            dir.join("dithus.toml").to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output = reliable_output(
+        dithus()
+            .env("PATH", path)
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
+            .env("OLLAMA_BASE_URL", &base_url)
+            .args([
+                "ask",
+                "--question",
+                "what is on my screen?",
+                "--config",
+                dir.join("dithus.toml").to_str().unwrap(),
+            ]),
+    );
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -395,19 +407,19 @@ fn ask_with_opencode_provider_uses_configured_model() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let output = dithus()
-        .env("PATH", path)
-        .args([
-            "ask",
-            "--question",
-            "what is on my screen?",
-            "--image",
-            "tests/fixtures/screen.png",
-            "--config",
-            dir.join("dithus.toml").to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output = reliable_output(
+        dithus()
+            .env("PATH", path)
+            .args([
+                "ask",
+                "--question",
+                "what is on my screen?",
+                "--image",
+                "tests/fixtures/screen.png",
+                "--config",
+                dir.join("dithus.toml").to_str().unwrap(),
+            ]),
+    );
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -450,18 +462,18 @@ fn ask_without_image_captures_screen_and_names_backend() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let output = dithus()
-        .env("PATH", path)
-        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
-        .args([
-            "ask",
-            "--question",
-            "what is on my screen?",
-            "--config",
-            "/nonexistent/dithus.toml",
-        ])
-        .output()
-        .unwrap();
+    let output = reliable_output(
+        dithus()
+            .env("PATH", path)
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
+            .args([
+                "ask",
+                "--question",
+                "what is on my screen?",
+                "--config",
+                "/nonexistent/dithus.toml",
+            ]),
+    );
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),

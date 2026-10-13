@@ -288,6 +288,7 @@ mod tests {
 
     #[test]
     fn opencode_concatenates_text_events_into_answer() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-answer",
             "opencode",
@@ -310,6 +311,7 @@ mod tests {
 
     #[test]
     fn opencode_passes_format_model_and_question() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-argv",
             "opencode",
@@ -341,6 +343,7 @@ mod tests {
 
     #[test]
     fn opencode_omits_model_flag_when_unset() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-nomodel",
             "opencode",
@@ -365,6 +368,7 @@ mod tests {
 
     #[test]
     fn opencode_delivers_image_bytes_through_attached_file() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-image",
             "opencode",
@@ -396,6 +400,7 @@ mod tests {
 
     #[test]
     fn opencode_skips_file_flag_without_image() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-noimage",
             "opencode",
@@ -420,6 +425,7 @@ mod tests {
 
     #[test]
     fn opencode_surfaces_provider_error_event() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-err",
             "opencode",
@@ -443,6 +449,7 @@ mod tests {
 
     #[test]
     fn opencode_rejects_nonzero_exit_with_stderr() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-exit",
             "opencode",
@@ -463,6 +470,7 @@ mod tests {
 
     #[test]
     fn opencode_nonzero_exit_keeps_stdout_excerpt() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-exit-out",
             "opencode",
@@ -487,6 +495,7 @@ mod tests {
 
     #[test]
     fn opencode_rejects_answerless_output() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin(
             "dithus-oc-empty",
             "opencode",
@@ -507,6 +516,7 @@ mod tests {
 
     #[test]
     fn opencode_kills_a_hung_process() {
+        let _guard = crate::test_support::write_exec_guard();
         let dir = fake_bin("dithus-oc-hung", "opencode", "#!/bin/sh\nsleep 30\n");
         let provider = OpenCodeProvider {
             command: dir.join("opencode").to_str().unwrap().to_string(),
@@ -523,6 +533,7 @@ mod tests {
 
     #[test]
     fn opencode_missing_binary_is_actionable() {
+        let _guard = crate::test_support::write_exec_guard();
         let provider = OpenCodeProvider {
             command: "/nonexistent/opencode".to_string(),
             model: String::new(),

@@ -2,6 +2,17 @@ mod capture;
 mod config;
 mod provider;
 
+#[cfg(test)]
+mod test_support {
+    use std::sync::{Mutex, MutexGuard};
+
+    static WRITE_EXEC_LOCK: Mutex<()> = Mutex::new(());
+
+    pub fn write_exec_guard() -> MutexGuard<'static, ()> {
+        WRITE_EXEC_LOCK.lock().unwrap()
+    }
+}
+
 use capture::capture_screenshot;
 use clap::{Parser, Subcommand};
 use config::load_config;
